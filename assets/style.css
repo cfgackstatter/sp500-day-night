@@ -1,0 +1,267 @@
+/* Global styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f5f5;
+    padding: 20px;
+}
+
+/* Container */
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+/* Header */
+.header {
+    background: #2c3e50;
+    padding: 20px 30px;
+    color: white;
+}
+
+.title {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.3px;
+}
+
+/* Controls section */
+.controls {
+    padding: 20px 30px;
+    background: #fafafa;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+.control-group {
+    min-width: 200px;
+}
+
+.control-group-left {
+    flex: 0 0 auto;
+}
+
+.control-group-right {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+.control-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Dropdown styling */
+.custom-dropdown .Select-control {
+    height: 38px !important;
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    background: white !important;
+    cursor: pointer !important;
+    transition: border-color 0.2s !important;
+}
+
+.custom-dropdown .Select-control:hover {
+    border-color: #999 !important;
+}
+
+.custom-dropdown .Select-value,
+.custom-dropdown .Select-placeholder {
+    line-height: 36px !important;
+    padding-left: 10px !important;
+    font-size: 14px !important;
+    color: #333 !important;
+}
+
+.custom-dropdown .Select-arrow-zone {
+    padding-right: 10px !important;
+}
+
+.custom-dropdown .Select-arrow {
+    border-color: #666 transparent transparent !important;
+    border-width: 5px 4px 0 !important;
+}
+
+.custom-dropdown.is-open .Select-arrow {
+    border-color: transparent transparent #666 !important;
+    border-width: 0 4px 5px !important;
+}
+
+.custom-dropdown .Select-menu-outer {
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    margin-top: 2px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+.custom-dropdown .Select-option {
+    padding: 8px 10px !important;
+    font-size: 14px !important;
+}
+
+.custom-dropdown .Select-option.is-focused {
+    background-color: #f5f5f5 !important;
+}
+
+.custom-dropdown .Select-option.is-selected {
+    background-color: #2c3e50 !important;
+    color: white !important;
+}
+
+/* Date picker */
+.date-picker .DateRangePickerInput {
+    height: 38px !important;
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    background: white !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 10px !important;
+}
+
+.date-picker .DateInput {
+    width: 48% !important;
+}
+
+.date-picker .DateInput_input {
+    height: 36px !important;
+    border: none !important;
+    padding: 0 !important;
+    font-size: 14px !important;
+    text-align: center !important;
+    color: #333 !important;
+}
+
+.date-picker .DateRangePickerInput_arrow {
+    padding: 0 6px !important;
+}
+
+/* Graph */
+.graph {
+    padding: 15px 30px 10px 30px;
+    background: white;
+}
+
+/* Metrics section */
+.metrics-container {
+    padding: 15px 30px 25px 30px;
+    background: white;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+}
+
+.metric-card {
+    background: #fafafa;
+    border-radius: 6px;
+    padding: 16px;
+    text-align: center;
+    transition: transform 0.15s ease;
+}
+
+/* Border styles for each metric card */
+.metric-card-overnight {
+    border: 2px solid #1a1a1a;
+}
+
+.metric-card-intraday {
+    border: 2px solid #d0d0d0;
+}
+
+.metric-card-buyhold {
+    border: 2px dashed #808080;
+}
+
+.metric-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.metric-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #2c3e50;
+    margin-bottom: 2px;
+    font-variant-numeric: tabular-nums;
+}
+
+.metric-subtitle {
+    font-size: 11px;
+    color: #999;
+}
+
+/* Loading spinner */
+._dash-loading {
+    margin: 20px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+    
+    .header {
+        padding: 16px 20px;
+    }
+    
+    .title {
+        font-size: 18px;
+    }
+    
+    .controls {
+        padding: 16px 20px;
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .control-group,
+    .control-group-left,
+    .control-group-right {
+        min-width: 100%;
+        margin-left: 0;
+    }
+    
+    .graph {
+        padding: 15px 20px 10px 20px;
+    }
+    
+    .metrics-container {
+        padding: 15px 20px 20px 20px;
+    }
+    
+    .metrics-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+}
