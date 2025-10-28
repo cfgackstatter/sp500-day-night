@@ -1,0 +1,25 @@
+# .ebignore - Files to exclude from EB deployment
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.git/
+.gitignore
+README.md
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.env
