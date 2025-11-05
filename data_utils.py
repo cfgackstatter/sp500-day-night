@@ -67,48 +67,39 @@ def load_all_data() -> Dict[str, pd.DataFrame]:
 
 def calculate_daily_strategies(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculates cumulative returns for overnight, intraday, and buy-and-hold strategies.
-    
-    Strategy definitions for day t:
-    - Overnight (t): Return from Close(t-1) to Open(t)
-    - Intraday (t): Return from Open(t) to Close(t)
-    - Buy & Hold (t): Return from Close(t-1) to Close(t)
+    Calculates daily returns and cumulative indices for all strategies.
     
     Args:
         df: DataFrame with Date, Open, Close columns
         
     Returns:
-        DataFrame with Date and daily return columns (not cumulative yet)
+        DataFrame with Date, daily returns, and cumulative indices
     """
     df = df.copy()
     df = df.sort_values("Date").reset_index(drop=True)
     
-    # Calculate daily returns for each strategy
-    # Overnight: (Open_t - Close_t-1) / Close_t-1
+    # Calculate daily returns
     df["overnight_return"] = (df["Open"] - df["Close"].shift(1)) / df["Close"].shift(1)
-    
-    # Intraday: (Close_t - Open_t) / Open_t
     df["intraday_return"] = (df["Close"] - df["Open"]) / df["Open"]
-    
-    # Buy & Hold: (Close_t - Close_t-1) / Close_t-1
     df["buy_hold_return"] = df["Close"].pct_change()
     
     # Fill NaN values in first row
     df = df.fillna(0)
     
-    # Keep daily returns for later cumulative calculation
-    result = df[["Date", "overnight_return", "intraday_return", "buy_hold_return"]].copy()
+    # Calculate cumulative indices (starting at 1.0)
+    df["overnight_index"] = (1 + df["overnight_return"]).cumprod()
+    df["intraday_index"] = (1 + df["intraday_return"]).cumprod()
+    df["buy_hold_index"] = (1 + df["buy_hold_return"]).cumprod()
     
-    return result
+    return df
 
 
 def calculate_metrics(df: pd.DataFrame, start_date: str, end_date: str) -> Dict[str, float]:
     """
     Calculates performance metrics for the selected date range.
-    Properly compounds returns only within the selected date range.
     
     Args:
-        df: DataFrame with Date and daily return columns
+        df: DataFrame with Date and cumulative indices
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         
@@ -120,47 +111,48 @@ def calculate_metrics(df: pd.DataFrame, start_date: str, end_date: str) -> Dict[
     filtered = df[mask].copy()
     
     if filtered.empty:
-        return {
-            "overnight": 0.0,
-            "intraday": 0.0,
-            "buy_hold": 0.0,
-        }
+        return {"overnight": 0.0, "intraday": 0.0, "buy_hold": 0.0}
     
-    # Calculate cumulative returns within the filtered range
-    # Compound returns: (1+r1)*(1+r2)*...*(1+rn) - 1
+    # Get start and end values
+    start_overnight = filtered["overnight_index"].iloc[0]
+    start_intraday = filtered["intraday_index"].iloc[0]
+    start_buy_hold = filtered["buy_hold_index"].iloc[0]
     
-    # Convert Series to numpy array, compute product, then convert to Python float
-    overnight_returns = filtered["overnight_return"].to_numpy()
-    intraday_returns = filtered["intraday_return"].to_numpy()
-    buy_hold_returns = filtered["buy_hold_return"].to_numpy()
+    end_overnight = filtered["overnight_index"].iloc[-1]
+    end_intraday = filtered["intraday_index"].iloc[-1]
+    end_buy_hold = filtered["buy_hold_index"].iloc[-1]
     
-    # Use item() to extract scalar as Python float
-    overnight_cumulative = float((1 + overnight_returns).prod().item()) - 1.0
-    intraday_cumulative = float((1 + intraday_returns).prod().item()) - 1.0
-    buy_hold_cumulative = float((1 + buy_hold_returns).prod().item()) - 1.0
-    
+    # Calculate total returns as (end_index / start_index - 1) * 100
     return {
-        "overnight": overnight_cumulative * 100.0,  # Convert to percentage
-        "intraday": intraday_cumulative * 100.0,
-        "buy_hold": buy_hold_cumulative * 100.0,
+        "overnight": (end_overnight / start_overnight - 1) * 100,
+        "intraday": (end_intraday / start_intraday - 1) * 100,
+        "buy_hold": (end_buy_hold / start_buy_hold - 1) * 100,
     }
 
 
 def get_cumulative_series(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Converts daily returns to cumulative return series.
+    Converts indices to cumulative return series starting from 0%.
     
     Args:
-        df: DataFrame with Date and daily return columns
+        df: DataFrame with Date and index columns
         
     Returns:
-        DataFrame with Date and cumulative return columns
+        DataFrame with Date and cumulative return columns for plotting
     """
+    if df.empty:
+        return pd.DataFrame(columns=["Date", "overnight", "intraday", "buy_hold"])
+    
     df = df.copy()
     
-    # Calculate cumulative returns (compound growth from start)
-    df["overnight"] = (1 + df["overnight_return"]).cumprod() - 1
-    df["intraday"] = (1 + df["intraday_return"]).cumprod() - 1
-    df["buy_hold"] = (1 + df["buy_hold_return"]).cumprod() - 1
+    # Get the starting values (first row indices)
+    start_overnight = df["overnight_index"].iloc[0]
+    start_intraday = df["intraday_index"].iloc[0]
+    start_buy_hold = df["buy_hold_index"].iloc[0]
+    
+    # Calculate cumulative returns: (index_t / index_start) - 1
+    df["overnight"] = (df["overnight_index"] / start_overnight) - 1
+    df["intraday"] = (df["intraday_index"] / start_intraday) - 1
+    df["buy_hold"] = (df["buy_hold_index"] / start_buy_hold) - 1
     
     return df[["Date", "overnight", "intraday", "buy_hold"]]
