@@ -170,7 +170,7 @@ def register_callbacks(app: Any, data_cache: Dict[str, pd.DataFrame]) -> None:
             "btn-custom": "custom"
         }
         
-        selected_period = period_map.get(button_id, current_period)
+        selected_period = period_map.get(button_id, current_period or "1y")
         
         # Calculate date range for selected period
         if selected_period != "custom":
