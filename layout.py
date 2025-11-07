@@ -37,7 +37,7 @@ def create_layout(app: Any, data_cache: Dict[str, pd.DataFrame]) -> html.Div:
             html.Div(
                 className="header",
                 children=[
-                    html.H1("Overnight vs Intraday Returns", className="title"),
+                    html.H1("Day vs Night Returns", className="title"),
                 ]
             ),
             

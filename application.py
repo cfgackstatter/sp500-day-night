@@ -1,4 +1,8 @@
-"""Main entry point for Dash S&P 500 Overnight Returns web app."""
+"""Main entry point for Dash S&P 500 Day vs Night Returns web app.
+
+This file is named 'application.py' for AWS Elastic Beanstalk compatibility.
+The Dash app object is exposed as 'application' for EB's WSGI server.
+"""
 
 from dash import Dash
 from layout import create_layout
@@ -13,7 +17,7 @@ app = Dash(
     ],
 )
 
-app.title = "S&P 500 Overnight Returns"
+app.title = "Day vs Night Returns"
 
 # Load all data at startup (shared across all callbacks)
 print("Loading historical data for all symbols...")
@@ -27,4 +31,5 @@ app.layout = create_layout(app, data_cache)
 application = app.server
 
 if __name__ == "__main__":
+    # For local development
     app.run(host="0.0.0.0", port=8080, debug=True)
