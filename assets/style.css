@@ -265,3 +265,66 @@ body {
         gap: 12px;
     }
 }
+
+/* Period Controls */
+.period-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.period-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.period-btn {
+    padding: 6px 12px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #495057;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 45px;
+}
+
+.period-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.period-btn-active {
+    background: #2c3e50 !important;
+    color: white !important;
+    border-color: #2c3e50 !important;
+}
+
+.date-picker-hidden {
+    display: none !important;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    .period-buttons {
+        flex-wrap: wrap;
+        gap: 3px;
+    }
+    
+    .period-btn {
+        padding: 5px 8px;
+        font-size: 11px;
+        min-width: 35px;
+    }
+    
+    .controls {
+        flex-direction: column;
+        gap: 16px;
+    }
+    
+    .control-group-right {
+        margin-left: 0 !important;
+    }
+}

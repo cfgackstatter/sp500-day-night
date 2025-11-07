@@ -1,12 +1,14 @@
 """Layout and callback definitions for the Dash application."""
 
 from typing import Any, Dict, Tuple
-from dash import html, dcc, Input, Output
+from dash import html, dcc, Input, Output, State
 import plotly.graph_objs as go
 from datetime import datetime, timedelta
 import pandas as pd
 from data_utils import (
     get_index_choices,
+    get_date_range_options,
+    calculate_date_range,
     calculate_daily_strategies,
     calculate_metrics,
     get_cumulative_series,
@@ -60,18 +62,39 @@ def create_layout(app: Any, data_cache: Dict[str, pd.DataFrame]) -> html.Div:
                     html.Div(
                         className="control-group control-group-right",
                         children=[
-                            html.Label("Date Range", className="control-label"),
-                            dcc.DatePickerRange(
-                                id="date-range",
-                                start_date=start_date.strftime("%Y-%m-%d"),
-                                end_date=end_date.strftime("%Y-%m-%d"),
-                                display_format="YYYY-MM-DD",
-                                className="date-picker",
+                            html.Label("Period", className="control-label"),
+                            html.Div(
+                                className="period-controls",
+                                children=[
+                                    # Period buttons
+                                    html.Div(
+                                        className="period-buttons",
+                                        children=[
+                                            html.Button("YTD", id="btn-ytd", className="period-btn"),
+                                            html.Button("1Y", id="btn-1y", className="period-btn period-btn-active"),
+                                            html.Button("3Y", id="btn-3y", className="period-btn"),
+                                            html.Button("5Y", id="btn-5y", className="period-btn"),
+                                            html.Button("10Y", id="btn-10y", className="period-btn"),
+                                            html.Button("Custom", id="btn-custom", className="period-btn"),
+                                        ]
+                                    ),
+                                    # Date picker (initially hidden)
+                                    dcc.DatePickerRange(
+                                        id="date-range",
+                                        start_date=start_date.strftime("%Y-%m-%d"),
+                                        end_date=end_date.strftime("%Y-%m-%d"),
+                                        display_format="YYYY-MM-DD",
+                                        className="date-picker date-picker-hidden",
+                                    ),
+                                ]
                             ),
                         ]
                     ),
                 ]
             ),
+            
+            # Hidden div to store current period
+            html.Div(id="current-period", children="1y", style={"display": "none"}),
             
             # Graph section
             dcc.Loading(
@@ -104,13 +127,80 @@ def register_callbacks(app: Any, data_cache: Dict[str, pd.DataFrame]) -> None:
         data_cache: Pre-loaded data for all symbols
     """
     
+    # Callback to handle period button clicks
+    @app.callback(
+        [Output("current-period", "children"),
+         Output("date-range", "className"),
+         Output("date-range", "start_date"),
+         Output("date-range", "end_date"),
+         Output("btn-ytd", "className"),
+         Output("btn-1y", "className"),
+         Output("btn-3y", "className"),
+         Output("btn-5y", "className"),
+         Output("btn-10y", "className"),
+         Output("btn-custom", "className")],
+        [Input("btn-ytd", "n_clicks"),
+         Input("btn-1y", "n_clicks"),
+         Input("btn-3y", "n_clicks"),
+         Input("btn-5y", "n_clicks"),
+         Input("btn-10y", "n_clicks"),
+         Input("btn-custom", "n_clicks")],
+        [State("current-period", "children")]
+    )
+    def update_period_selection(ytd_clicks, y1_clicks, y3_clicks, y5_clicks, y10_clicks, custom_clicks, current_period):
+        """Handle period button clicks and update date range."""
+        from dash import callback_context
+        
+        if not callback_context.triggered:
+            # Default to 1Y on startup
+            start_date, end_date = calculate_date_range("1y", data_cache)
+            return ("1y", "date-picker date-picker-hidden", start_date, end_date,
+                    "period-btn", "period-btn period-btn-active", "period-btn", 
+                    "period-btn", "period-btn", "period-btn")
+        
+        button_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+        
+        # Map button IDs to periods
+        period_map = {
+            "btn-ytd": "ytd",
+            "btn-1y": "1y", 
+            "btn-3y": "3y",
+            "btn-5y": "5y",
+            "btn-10y": "10y",
+            "btn-custom": "custom"
+        }
+        
+        selected_period = period_map.get(button_id, current_period)
+        
+        # Calculate date range for selected period
+        if selected_period != "custom":
+            start_date, end_date = calculate_date_range(selected_period, data_cache)
+            date_picker_class = "date-picker date-picker-hidden"
+        else:
+            # Keep current dates for custom mode
+            start_date, end_date = calculate_date_range("1y", data_cache)
+            date_picker_class = "date-picker"
+        
+        # Set active button classes
+        button_classes = {
+            "btn-ytd": "period-btn period-btn-active" if selected_period == "ytd" else "period-btn",
+            "btn-1y": "period-btn period-btn-active" if selected_period == "1y" else "period-btn",
+            "btn-3y": "period-btn period-btn-active" if selected_period == "3y" else "period-btn",
+            "btn-5y": "period-btn period-btn-active" if selected_period == "5y" else "period-btn",
+            "btn-10y": "period-btn period-btn-active" if selected_period == "10y" else "period-btn",
+            "btn-custom": "period-btn period-btn-active" if selected_period == "custom" else "period-btn"
+        }
+        
+        return (selected_period, date_picker_class, start_date, end_date,
+                button_classes["btn-ytd"], button_classes["btn-1y"], button_classes["btn-3y"],
+                button_classes["btn-5y"], button_classes["btn-10y"], button_classes["btn-custom"])
+    
+    # Main dashboard callback
     @app.callback(
         [Output("perf-graph", "figure"), Output("metrics-container", "children")],
-        [
-            Input("symbol-dropdown", "value"),
-            Input("date-range", "start_date"),
-            Input("date-range", "end_date"),
-        ],
+        [Input("symbol-dropdown", "value"),
+         Input("date-range", "start_date"),
+         Input("date-range", "end_date")],
     )
     def update_dashboard(
         symbol: str,
@@ -119,14 +209,6 @@ def register_callbacks(app: Any, data_cache: Dict[str, pd.DataFrame]) -> None:
     ) -> Tuple[go.Figure, html.Div]:
         """
         Updates the graph and metrics based on selected symbol and date range.
-        
-        Args:
-            symbol: Selected ticker symbol
-            start_date: Start date for display range
-            end_date: End date for display range
-            
-        Returns:
-            Tuple of (Plotly figure, metrics HTML div)
         """
         # Validate inputs
         if not symbol or symbol not in data_cache:
@@ -173,15 +255,7 @@ def register_callbacks(app: Any, data_cache: Dict[str, pd.DataFrame]) -> None:
 
 
 def create_empty_figure(message: str) -> go.Figure:
-    """
-    Creates an empty figure with a centered message.
-    
-    Args:
-        message: Text to display
-        
-    Returns:
-        go.Figure: Empty Plotly figure with annotation
-    """
+    """Creates an empty figure with a centered message."""
     fig = go.Figure()
     fig.add_annotation(
         text=message,
@@ -205,15 +279,7 @@ def create_empty_figure(message: str) -> go.Figure:
 
 
 def create_performance_figure(data: pd.DataFrame) -> go.Figure:
-    """
-    Creates the performance comparison chart with monochrome styling.
-    
-    Args:
-        data: DataFrame with Date and cumulative strategy columns
-        
-    Returns:
-        go.Figure: Formatted Plotly figure with very dark, light, and medium dashed lines
-    """
+    """Creates the performance comparison chart with monochrome styling."""
     fig = go.Figure()
     
     # Monochrome palette: very dark, very light, medium gray
@@ -289,15 +355,7 @@ def create_performance_figure(data: pd.DataFrame) -> go.Figure:
 
 
 def create_metrics_display(metrics: Dict[str, float]) -> html.Div:
-    """
-    Creates the compact metrics display with matching border styles.
-    
-    Args:
-        metrics: Dictionary with strategy performance metrics
-        
-    Returns:
-        html.Div: Formatted metrics section
-    """
+    """Creates the compact metrics display with matching border styles."""
     return html.Div(
         className="metrics-grid",
         children=[
