@@ -1,261 +1,215 @@
-"""Data fetching and strategy computation utilities."""
+"""Data fetching, ticker persistence, and strategy computation."""
 
-from typing import Dict, List, Any, Tuple
-import yfinance as yf
+from __future__ import annotations
+
+from pathlib import Path
+
 import pandas as pd
-from datetime import datetime, timedelta
+import yfinance as yf
+
+TICKERS_FILE = Path(__file__).with_name("tickers.txt")
+START = "1990-01-01"
 
 
-def get_index_choices() -> List[Dict[str, Any]]:
-    """
-    Returns dropdown choices for major index ETFs.
-    
-    Returns:
-        List of dictionaries with 'label' and 'value' keys for Dash dropdown.
-    """
+def load_tickers() -> list[str]:
+    if not TICKERS_FILE.exists():
+        return ["SPY", "QQQ", "DIA", "IWM"]
     return [
-        {"label": "S&P 500 (SPY)", "value": "SPY"},
-        {"label": "NASDAQ 100 (QQQ)", "value": "QQQ"},
-        {"label": "Dow Jones (DIA)", "value": "DIA"},
-        {"label": "Russell 2000 (IWM)", "value": "IWM"},
+        line.strip().upper()
+        for line in TICKERS_FILE.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
     ]
 
 
-def load_all_data() -> Dict[str, pd.DataFrame]:
-    """
-    Loads maximum available historical daily data for all symbols at startup.
-    Downloads as much history as possible for each symbol.
-    
-    Returns:
-        Dictionary mapping symbol to DataFrame with Date, Open, Close columns.
-    """
-    symbols = [choice["value"] for choice in get_index_choices()]
-    data_cache = {}
-    
-    # Download maximum available data (30+ years back)
-    end_date = datetime.now()
-    start_date = datetime(1990, 1, 1)  # Start from 1990 to get maximum history
-    
-    for symbol in symbols:
-        try:
-            print(f"Downloading {symbol} (maximum history)...")
-            df = yf.download(
-                symbol,
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-                interval="1d",
-                progress=False,
-                auto_adjust=True,
-            )
-            
-            if df is not None and not df.empty:
-                df = df.reset_index()
-                # Ensure we have Date, Open, Close columns
-                if "Date" in df.columns and "Open" in df.columns and "Close" in df.columns:
-                    data_cache[symbol] = df[["Date", "Open", "Close"]].copy()
-                    first_date = df["Date"].iloc[0].strftime("%Y-%m-%d")
-                    last_date = df["Date"].iloc[-1].strftime("%Y-%m-%d")
-                    print(f"  ✓ {symbol}: {len(df)} days loaded ({first_date} to {last_date})")
-                else:
-                    print(f"  ✗ {symbol}: Missing required columns")
-            else:
-                print(f"  ✗ {symbol}: No data returned")
-                
-        except Exception as e:
-            print(f"  ✗ {symbol}: Error - {str(e)}")
-    
-    return data_cache
+def save_tickers(tickers: list[str]) -> None:
+    TICKERS_FILE.write_text("\n".join(dict.fromkeys(tickers)) + "\n")
 
 
-def get_date_range_options(data_cache: Dict[str, pd.DataFrame]) -> List[Dict[str, str]]:
-    """
-    Returns pre-defined date range options based on available data.
-    
-    Args:
-        data_cache: Dictionary of loaded data for all symbols
-        
-    Returns:
-        List of date range options for dropdown
-    """
-    if not data_cache:
-        return [{"label": "Custom", "value": "custom"}]
-    
-    # Find the latest date across all symbols (most recent data)
-    latest_dates = []
-    for df in data_cache.values():
-        if not df.empty:
-            latest_dates.append(df["Date"].max())
-    
-    if not latest_dates:
-        return [{"label": "Custom", "value": "custom"}]
-    
-    current_date = max(latest_dates)
-    
-    # Calculate year-to-date start (last trading day of previous year)
-    ytd_year = current_date.year
-    prev_year_end = None
-    
-    # Find the last trading day of previous year across all symbols
-    for df in data_cache.values():
-        if not df.empty:
-            prev_year_data = df[df["Date"].dt.year == (ytd_year - 1)]
-            if not prev_year_data.empty:
-                last_day_prev_year = prev_year_data["Date"].max()
-                if prev_year_end is None or last_day_prev_year > prev_year_end:
-                    prev_year_end = last_day_prev_year
-    
-    return [
-        {"label": "YTD", "value": "ytd"},
-        {"label": "1Y", "value": "1y"},
-        {"label": "3Y", "value": "3y"}, 
-        {"label": "5Y", "value": "5y"},
-        {"label": "10Y", "value": "10y"},
-        {"label": "Custom", "value": "custom"}
-    ]
+def dropdown_options(tickers: list[str]) -> list[dict[str, str]]:
+    return [{"label": t, "value": t} for t in tickers]
 
 
-def calculate_date_range(period: str, data_cache: Dict[str, pd.DataFrame]) -> Tuple[str, str]:
-    """
-    Calculates start and end dates for predefined periods.
-    
-    Args:
-        period: Period string (ytd, 1y, 3y, 5y, 10y)
-        data_cache: Dictionary of loaded data
-        
-    Returns:
-        Tuple of (start_date, end_date) as strings
-    """
-    if not data_cache:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=365)
-        return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
-    
-    # Find the latest date across all symbols
-    latest_dates = []
-    for df in data_cache.values():
-        if not df.empty:
-            latest_dates.append(df["Date"].max())
-    
-    current_date = max(latest_dates) if latest_dates else datetime.now()
-    
-    if period == "ytd":
-        # Find last trading day of previous year
-        ytd_year = current_date.year
-        prev_year_end = None
-        
-        for df in data_cache.values():
-            if not df.empty:
-                prev_year_data = df[df["Date"].dt.year == (ytd_year - 1)]
-                if not prev_year_data.empty:
-                    last_day_prev_year = prev_year_data["Date"].max()
-                    if prev_year_end is None or last_day_prev_year > prev_year_end:
-                        prev_year_end = last_day_prev_year
-        
-        start_date = prev_year_end if prev_year_end else datetime(ytd_year, 1, 1)
-        
-    elif period == "1y":
-        start_date = current_date - timedelta(days=365)
-    elif period == "3y":
-        start_date = current_date - timedelta(days=3 * 365)
-    elif period == "5y":
-        start_date = current_date - timedelta(days=5 * 365)
-    elif period == "10y":
-        start_date = current_date - timedelta(days=10 * 365)
-    else:
-        # Default to 2 years
-        start_date = current_date - timedelta(days=2 * 365)
-    
-    return start_date.strftime("%Y-%m-%d"), current_date.strftime("%Y-%m-%d")
-
-
-def calculate_daily_strategies(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculates daily returns and cumulative indices for all strategies.
-    
-    Args:
-        df: DataFrame with Date, Open, Close columns
-        
-    Returns:
-        DataFrame with Date, daily returns, and cumulative indices
-    """
-    df = df.copy()
-    df = df.sort_values("Date").reset_index(drop=True)
-    
-    # Calculate daily returns
-    df["overnight_return"] = (df["Open"] - df["Close"].shift(1)) / df["Close"].shift(1)
-    df["intraday_return"] = (df["Close"] - df["Open"]) / df["Open"]
-    df["buy_hold_return"] = df["Close"].pct_change()
-    
-    # Fill NaN values in first row
-    df = df.fillna(0)
-    
-    # Calculate cumulative indices (starting at 1.0)
-    df["overnight_index"] = (1 + df["overnight_return"]).cumprod()
-    df["intraday_index"] = (1 + df["intraday_return"]).cumprod()
-    df["buy_hold_index"] = (1 + df["buy_hold_return"]).cumprod()
-    
+def _flatten(df: pd.DataFrame) -> pd.DataFrame:
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
     return df
 
 
-def calculate_metrics(df: pd.DataFrame, start_date: str, end_date: str) -> Dict[str, float]:
-    """
-    Calculates performance metrics for the selected date range.
-    
-    Args:
-        df: DataFrame with Date and cumulative indices
-        start_date: Start date in YYYY-MM-DD format
-        end_date: End date in YYYY-MM-DD format
-        
-    Returns:
-        Dictionary with cumulative performance metrics (%) for each strategy
-    """
-    # Filter by date range
-    mask = (df["Date"] >= start_date) & (df["Date"] <= end_date)
-    filtered = df[mask].copy()
-    
+def _extract_symbol(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """Pull one symbol's OHLCV from a yfinance download frame."""
+    if isinstance(raw.columns, pd.MultiIndex):
+        level0 = raw.columns.get_level_values(0)
+        if symbol in level0:
+            return raw[symbol].copy()
+        # Single-ticker download sometimes uses Price as level 0
+        if "Open" in level0 or "Close" in level0:
+            return _flatten(raw)
+    return raw.copy()
+
+
+def _to_ohlc(df: pd.DataFrame) -> pd.DataFrame | None:
+    df = _flatten(df).reset_index()
+    if "Date" not in df.columns and "Datetime" in df.columns:
+        df = df.rename(columns={"Datetime": "Date"})
+    if not {"Date", "Open", "Close"}.issubset(df.columns):
+        return None
+    out = df[["Date", "Open", "Close"]].dropna()
+    out["Date"] = pd.to_datetime(out["Date"]).dt.tz_localize(None)
+    return out.sort_values("Date").reset_index(drop=True)
+
+
+def calculate_daily_strategies(df: pd.DataFrame) -> pd.DataFrame:
+    """Overnight / intraday / buy-hold returns and cumulative indices."""
+    df = df.sort_values("Date").reset_index(drop=True)
+    overnight = df["Open"] / df["Close"].shift(1) - 1
+    intraday = df["Close"] / df["Open"] - 1
+    buy_hold = df["Close"].pct_change()
+
+    out = pd.DataFrame(
+        {
+            "Date": df["Date"],
+            "overnight_return": overnight,
+            "intraday_return": intraday,
+            "buy_hold_return": buy_hold,
+        }
+    ).dropna()
+
+    out["overnight_index"] = (1 + out["overnight_return"]).cumprod()
+    out["intraday_index"] = (1 + out["intraday_return"]).cumprod()
+    out["buy_hold_index"] = (1 + out["buy_hold_return"]).cumprod()
+    return out
+
+
+def fetch_symbol(symbol: str) -> pd.DataFrame | None:
+    """Download one symbol and return strategy frame, or None on failure."""
+    try:
+        raw = yf.download(
+            symbol,
+            start=START,
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+        )
+    except Exception as exc:
+        print(f"  ✗ {symbol}: {exc}")
+        return None
+
+    ohlc = _to_ohlc(_extract_symbol(raw, symbol))
+    if ohlc is None or ohlc.empty:
+        print(f"  ✗ {symbol}: no usable OHLC")
+        return None
+
+    strategies = calculate_daily_strategies(ohlc)
+    print(
+        f"  ✓ {symbol}: {len(strategies)} days "
+        f"({strategies['Date'].iloc[0].date()} → {strategies['Date'].iloc[-1].date()})"
+    )
+    return strategies
+
+
+def load_all_data(tickers: list[str] | None = None) -> dict[str, pd.DataFrame]:
+    """Batch-download tickers and precompute strategy series."""
+    tickers = list(dict.fromkeys(tickers or load_tickers()))
+    if not tickers:
+        return {}
+
+    print(f"Downloading {', '.join(tickers)}...")
+    try:
+        raw = yf.download(
+            tickers,
+            start=START,
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            threads=True,
+            group_by="ticker",
+        )
+    except Exception as exc:
+        print(f"Batch download failed ({exc}); falling back to per-symbol")
+        return {t: df for t in tickers if (df := fetch_symbol(t)) is not None}
+
+    cache: dict[str, pd.DataFrame] = {}
+    for symbol in tickers:
+        try:
+            ohlc = _to_ohlc(_extract_symbol(raw, symbol))
+            if ohlc is None or ohlc.empty:
+                print(f"  ✗ {symbol}: no usable OHLC")
+                continue
+            cache[symbol] = calculate_daily_strategies(ohlc)
+            df = cache[symbol]
+            print(
+                f"  ✓ {symbol}: {len(df)} days "
+                f"({df['Date'].iloc[0].date()} → {df['Date'].iloc[-1].date()})"
+            )
+        except Exception as exc:
+            print(f"  ✗ {symbol}: {exc}")
+    return cache
+
+
+def refresh_cache(data_cache: dict[str, pd.DataFrame], tickers: list[str] | None = None) -> list[str]:
+    """Reload all ticker data into an existing cache dict. Returns loaded symbols."""
+    fresh = load_all_data(tickers or list(data_cache) or load_tickers())
+    data_cache.clear()
+    data_cache.update(fresh)
+    return list(data_cache)
+
+
+def calculate_date_range(period: str, data_cache: dict[str, pd.DataFrame]) -> tuple[str, str]:
+    """Return (start, end) ISO dates for a named period."""
+    latest = max((df["Date"].max() for df in data_cache.values() if not df.empty), default=pd.Timestamp.now())
+    end = pd.Timestamp(latest)
+
+    if period == "ytd":
+        prev = [
+            df.loc[df["Date"].dt.year == end.year - 1, "Date"].max()
+            for df in data_cache.values()
+            if not df.empty and (df["Date"].dt.year == end.year - 1).any()
+        ]
+        start = max(prev) if prev else pd.Timestamp(year=end.year, month=1, day=1)
+    elif period in {"1y", "3y", "5y", "10y"}:
+        start = end - pd.DateOffset(years=int(period[:-1]))
+    else:
+        start = end - pd.DateOffset(years=1)
+
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def slice_range(df: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    mask = (df["Date"] >= start) & (df["Date"] <= end)
+    return df.loc[mask]
+
+
+def calculate_metrics(df: pd.DataFrame, start: str, end: str) -> dict[str, dict[str, float]]:
+    filtered = slice_range(df, start, end)
+    empty = {"return": 0.0, "sharpe": 0.0}
     if filtered.empty:
-        return {"overnight": 0.0, "intraday": 0.0, "buy_hold": 0.0}
-    
-    # Get start and end values
-    start_overnight = filtered["overnight_index"].iloc[0]
-    start_intraday = filtered["intraday_index"].iloc[0]
-    start_buy_hold = filtered["buy_hold_index"].iloc[0]
-    
-    end_overnight = filtered["overnight_index"].iloc[-1]
-    end_intraday = filtered["intraday_index"].iloc[-1]
-    end_buy_hold = filtered["buy_hold_index"].iloc[-1]
-    
-    # Calculate total returns as (end_index / start_index - 1) * 100
+        return {"overnight": empty.copy(), "intraday": empty.copy(), "buy_hold": empty.copy()}
+
+    def for_strategy(index_col: str, return_col: str) -> dict[str, float]:
+        total = float(filtered[index_col].iloc[-1] / filtered[index_col].iloc[0] - 1) * 100
+        rets = filtered[return_col]
+        vol = float(rets.std())
+        sharpe = float(rets.mean() / vol * (252**0.5)) if vol > 0 else 0.0
+        return {"return": total, "sharpe": sharpe}
+
     return {
-        "overnight": (end_overnight / start_overnight - 1) * 100,
-        "intraday": (end_intraday / start_intraday - 1) * 100,
-        "buy_hold": (end_buy_hold / start_buy_hold - 1) * 100,
+        "overnight": for_strategy("overnight_index", "overnight_return"),
+        "intraday": for_strategy("intraday_index", "intraday_return"),
+        "buy_hold": for_strategy("buy_hold_index", "buy_hold_return"),
     }
 
 
 def get_cumulative_series(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Converts indices to cumulative return series starting from 0%.
-    
-    Args:
-        df: DataFrame with Date and index columns
-        
-    Returns:
-        DataFrame with Date and cumulative return columns for plotting
-    """
     if df.empty:
         return pd.DataFrame(columns=["Date", "overnight", "intraday", "buy_hold"])
-    
-    df = df.copy()
-    
-    # Get the starting values (first row indices)
-    start_overnight = df["overnight_index"].iloc[0]
-    start_intraday = df["intraday_index"].iloc[0]
-    start_buy_hold = df["buy_hold_index"].iloc[0]
-    
-    # Calculate cumulative returns: (index_t / index_start) - 1
-    df["overnight"] = (df["overnight_index"] / start_overnight) - 1
-    df["intraday"] = (df["intraday_index"] / start_intraday) - 1
-    df["buy_hold"] = (df["buy_hold_index"] / start_buy_hold) - 1
-    
-    return df[["Date", "overnight", "intraday", "buy_hold"]]
+
+    return pd.DataFrame(
+        {
+            "Date": df["Date"],
+            "overnight": df["overnight_index"] / df["overnight_index"].iloc[0] - 1,
+            "intraday": df["intraday_index"] / df["intraday_index"].iloc[0] - 1,
+            "buy_hold": df["buy_hold_index"] / df["buy_hold_index"].iloc[0] - 1,
+        }
+    )

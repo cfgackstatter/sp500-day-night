@@ -1,7 +1,7 @@
-dash==3.2.0
-plotly==6.3.1
-yfinance==0.2.66
+dash==4.4.1
+plotly==6.9.0
+yfinance==1.5.2
 pandas==2.3.3
-scipy==1.15.3
 numpy==2.2.6
-gunicorn==23.0.0
+pyarrow==25.0.0
+gunicorn==26.0.0

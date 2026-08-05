@@ -1,63 +1,69 @@
-"""Layout and callback definitions for the Dash application."""
+"""Layout and callbacks for the Dash application."""
 
-from typing import Any, Dict, Tuple
-from dash import html, dcc, Input, Output, State
-import plotly.graph_objs as go
-from datetime import datetime, timedelta
+from __future__ import annotations
+
+from typing import Any
+
 import pandas as pd
+import plotly.graph_objs as go
+from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
+
 from data_utils import (
-    get_index_choices,
-    get_date_range_options,
     calculate_date_range,
-    calculate_daily_strategies,
     calculate_metrics,
+    dropdown_options,
+    fetch_symbol,
     get_cumulative_series,
+    load_tickers,
+    refresh_cache,
+    save_tickers,
+    slice_range,
 )
 
+PERIODS = ("ytd", "1y", "3y", "5y", "10y", "custom")
+COLORS = {"overnight": "#1a1a1a", "intraday": "#d0d0d0", "buy_hold": "#808080"}
 
-def create_layout(app: Any, data_cache: Dict[str, pd.DataFrame]) -> html.Div:
-    """
-    Creates the main application layout with compact, professional design.
-    
-    Args:
-        app: Dash application instance
-        data_cache: Pre-loaded data for all symbols
-        
-    Returns:
-        html.Div: Complete application layout
-    """
-    # Set default date range (last 2 years)
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=2 * 365)
-    
+
+def create_layout(app: Dash, data_cache: dict[str, pd.DataFrame]) -> html.Div:
+    tickers = list(data_cache) or load_tickers()
+    start, end = calculate_date_range("1y", data_cache)
+
     layout = html.Div(
         className="container",
         children=[
-            # Header section
-            html.Div(
-                className="header",
-                children=[
-                    html.H1("Day vs Night Returns", className="title"),
-                ]
-            ),
-            
-            # Controls section
+            html.Div(className="header", children=[html.H1("Day vs Night Returns", className="title")]),
             html.Div(
                 className="controls",
                 children=[
                     html.Div(
                         className="control-group control-group-left",
                         children=[
-                            html.Label("Index", className="control-label"),
+                            html.Label("Ticker", className="control-label"),
                             dcc.Dropdown(
                                 id="symbol-dropdown",
-                                options=get_index_choices(),  # type: ignore
-                                value="SPY",
+                                options=dropdown_options(tickers),
+                                value=tickers[0] if tickers else None,
                                 clearable=False,
-                                searchable=False,
+                                searchable=True,
                                 className="custom-dropdown",
                             ),
-                        ]
+                            html.Div(
+                                className="ticker-manage",
+                                children=[
+                                    dcc.Input(
+                                        id="ticker-input",
+                                        type="text",
+                                        placeholder="Add ticker",
+                                        debounce=True,
+                                        className="ticker-input",
+                                    ),
+                                    html.Button("Add", id="btn-add", className="ticker-btn"),
+                                    html.Button("Remove", id="btn-remove", className="ticker-btn"),
+                                    html.Button("Refresh", id="btn-refresh", className="ticker-btn ticker-btn-refresh"),
+                                ],
+                            ),
+                            html.Div(id="ticker-status", className="ticker-status"),
+                        ],
                     ),
                     html.Div(
                         className="control-group control-group-right",
@@ -66,37 +72,33 @@ def create_layout(app: Any, data_cache: Dict[str, pd.DataFrame]) -> html.Div:
                             html.Div(
                                 className="period-controls",
                                 children=[
-                                    # Period buttons
                                     html.Div(
                                         className="period-buttons",
                                         children=[
-                                            html.Button("YTD", id="btn-ytd", className="period-btn"),
-                                            html.Button("1Y", id="btn-1y", className="period-btn period-btn-active"),
-                                            html.Button("3Y", id="btn-3y", className="period-btn"),
-                                            html.Button("5Y", id="btn-5y", className="period-btn"),
-                                            html.Button("10Y", id="btn-10y", className="period-btn"),
-                                            html.Button("Custom", id="btn-custom", className="period-btn"),
-                                        ]
+                                            html.Button(
+                                                p.upper(),
+                                                id=f"btn-{p}",
+                                                className="period-btn"
+                                                + (" period-btn-active" if p == "1y" else ""),
+                                            )
+                                            for p in PERIODS
+                                        ],
                                     ),
-                                    # Date picker (initially hidden)
                                     dcc.DatePickerRange(
                                         id="date-range",
-                                        start_date=start_date.strftime("%Y-%m-%d"),
-                                        end_date=end_date.strftime("%Y-%m-%d"),
+                                        start_date=start,
+                                        end_date=end,
                                         display_format="YYYY-MM-DD",
                                         className="date-picker date-picker-hidden",
                                     ),
-                                ]
+                                ],
                             ),
-                        ]
+                        ],
                     ),
-                ]
+                ],
             ),
-            
-            # Hidden div to store current period
             html.Div(id="current-period", children="1y", style={"display": "none"}),
-            
-            # Graph section
+            dcc.Store(id="data-revision", data=0),
             dcc.Loading(
                 id="loading",
                 type="default",
@@ -104,166 +106,134 @@ def create_layout(app: Any, data_cache: Dict[str, pd.DataFrame]) -> html.Div:
                     dcc.Graph(
                         id="perf-graph",
                         className="graph",
-                        config={"displayModeBar": False, "displaylogo": False}
+                        config={"displayModeBar": False, "displaylogo": False},
                     )
                 ],
             ),
-            
-            # Metrics section
             html.Div(id="metrics-container", className="metrics-container"),
-        ]
+        ],
     )
-
     register_callbacks(app, data_cache)
     return layout
 
 
-def register_callbacks(app: Any, data_cache: Dict[str, pd.DataFrame]) -> None:
-    """
-    Registers all application callbacks for interactivity.
-    
-    Args:
-        app: Dash application instance
-        data_cache: Pre-loaded data for all symbols
-    """
-    
-    # Callback to handle period button clicks
+def _period_classes(active: str) -> list[str]:
+    return [
+        "period-btn period-btn-active" if p == active else "period-btn"
+        for p in PERIODS
+    ]
+
+
+def register_callbacks(app: Dash, data_cache: dict[str, pd.DataFrame]) -> None:
     @app.callback(
-        [Output("current-period", "children"),
-         Output("date-range", "className"),
-         Output("date-range", "start_date"),
-         Output("date-range", "end_date"),
-         Output("btn-ytd", "className"),
-         Output("btn-1y", "className"),
-         Output("btn-3y", "className"),
-         Output("btn-5y", "className"),
-         Output("btn-10y", "className"),
-         Output("btn-custom", "className")],
-        [Input("btn-ytd", "n_clicks"),
-         Input("btn-1y", "n_clicks"),
-         Input("btn-3y", "n_clicks"),
-         Input("btn-5y", "n_clicks"),
-         Input("btn-10y", "n_clicks"),
-         Input("btn-custom", "n_clicks")],
-        [State("current-period", "children")]
+        Output("current-period", "children"),
+        Output("date-range", "className"),
+        Output("date-range", "start_date"),
+        Output("date-range", "end_date"),
+        *[Output(f"btn-{p}", "className") for p in PERIODS],
+        *[Input(f"btn-{p}", "n_clicks") for p in PERIODS],
+        State("current-period", "children"),
+        State("date-range", "start_date"),
+        State("date-range", "end_date"),
+        prevent_initial_call=False,
     )
-    def update_period_selection(ytd_clicks, y1_clicks, y3_clicks, y5_clicks, y10_clicks, custom_clicks, current_period):
-        """Handle period button clicks and update date range."""
-        from dash import callback_context
-        
-        if not callback_context.triggered:
-            # Default to 1Y on startup
-            start_date, end_date = calculate_date_range("1y", data_cache)
-            return ("1y", "date-picker date-picker-hidden", start_date, end_date,
-                    "period-btn", "period-btn period-btn-active", "period-btn", 
-                    "period-btn", "period-btn", "period-btn")
-        
-        button_id = callback_context.triggered[0]["prop_id"].split(".")[0]
-        
-        # Map button IDs to periods
-        period_map = {
-            "btn-ytd": "ytd",
-            "btn-1y": "1y", 
-            "btn-3y": "3y",
-            "btn-5y": "5y",
-            "btn-10y": "10y",
-            "btn-custom": "custom"
-        }
-        
-        selected_period = period_map.get(button_id, current_period or "1y")
-        
-        # Calculate date range for selected period
-        if selected_period != "custom":
-            start_date, end_date = calculate_date_range(selected_period, data_cache)
-            date_picker_class = "date-picker date-picker-hidden"
+    def update_period(*args: Any):
+        current, start, end = args[-3], args[-2], args[-1]
+        triggered = ctx.triggered_id
+        period = triggered.removeprefix("btn-") if triggered else (current or "1y")
+
+        if period == "custom":
+            # Keep whatever dates are currently selected
+            start = start or calculate_date_range("1y", data_cache)[0]
+            end = end or calculate_date_range("1y", data_cache)[1]
+            picker_class = "date-picker"
         else:
-            # Keep current dates for custom mode
-            start_date, end_date = calculate_date_range("1y", data_cache)
-            date_picker_class = "date-picker"
-        
-        # Set active button classes
-        button_classes = {
-            "btn-ytd": "period-btn period-btn-active" if selected_period == "ytd" else "period-btn",
-            "btn-1y": "period-btn period-btn-active" if selected_period == "1y" else "period-btn",
-            "btn-3y": "period-btn period-btn-active" if selected_period == "3y" else "period-btn",
-            "btn-5y": "period-btn period-btn-active" if selected_period == "5y" else "period-btn",
-            "btn-10y": "period-btn period-btn-active" if selected_period == "10y" else "period-btn",
-            "btn-custom": "period-btn period-btn-active" if selected_period == "custom" else "period-btn"
-        }
-        
-        return (selected_period, date_picker_class, start_date, end_date,
-                button_classes["btn-ytd"], button_classes["btn-1y"], button_classes["btn-3y"],
-                button_classes["btn-5y"], button_classes["btn-10y"], button_classes["btn-custom"])
-    
-    # Main dashboard callback
+            start, end = calculate_date_range(period, data_cache)
+            picker_class = "date-picker date-picker-hidden"
+
+        return period, picker_class, start, end, *_period_classes(period)
+
     @app.callback(
-        [Output("perf-graph", "figure"), Output("metrics-container", "children")],
-        [Input("symbol-dropdown", "value"),
-         Input("date-range", "start_date"),
-         Input("date-range", "end_date")],
+        Output("symbol-dropdown", "options"),
+        Output("symbol-dropdown", "value"),
+        Output("ticker-status", "children"),
+        Output("ticker-input", "value"),
+        Output("data-revision", "data"),
+        Input("btn-add", "n_clicks"),
+        Input("btn-remove", "n_clicks"),
+        Input("btn-refresh", "n_clicks"),
+        State("ticker-input", "value"),
+        State("symbol-dropdown", "value"),
+        State("data-revision", "data"),
+        prevent_initial_call=True,
     )
-    def update_dashboard(
-        symbol: str,
-        start_date: str,
-        end_date: str,
-    ) -> Tuple[go.Figure, html.Div]:
-        """
-        Updates the graph and metrics based on selected symbol and date range.
-        """
-        # Validate inputs
+    def manage_tickers(_add, _remove, _refresh, new_ticker, current, revision):
+        tickers = list(data_cache) or load_tickers()
+        revision = (revision or 0) + 1
+
+        if ctx.triggered_id == "btn-add":
+            symbol = (new_ticker or "").strip().upper()
+            if not symbol:
+                return no_update, no_update, "Enter a ticker symbol", no_update, no_update
+            if symbol in data_cache:
+                return dropdown_options(tickers), symbol, f"{symbol} already loaded", "", no_update
+            df = fetch_symbol(symbol)
+            if df is None:
+                return no_update, no_update, f"Could not load {symbol}", no_update, no_update
+            data_cache[symbol] = df
+            tickers = list(data_cache)
+            save_tickers(tickers)
+            return dropdown_options(tickers), symbol, f"Added {symbol}", "", revision
+
+        if ctx.triggered_id == "btn-remove":
+            if not current or current not in data_cache:
+                return no_update, no_update, "Nothing to remove", no_update, no_update
+            if len(data_cache) <= 1:
+                return no_update, no_update, "Keep at least one ticker", no_update, no_update
+            del data_cache[current]
+            tickers = list(data_cache)
+            save_tickers(tickers)
+            return dropdown_options(tickers), tickers[0], f"Removed {current}", no_update, revision
+
+        loaded = refresh_cache(data_cache, load_tickers())
+        if not loaded:
+            return [], None, "Refresh failed — no data", no_update, revision
+        save_tickers(loaded)
+        selected = current if current in loaded else loaded[0]
+        return dropdown_options(loaded), selected, f"Refreshed {len(loaded)} tickers", no_update, revision
+
+    @app.callback(
+        Output("perf-graph", "figure"),
+        Output("metrics-container", "children"),
+        Input("symbol-dropdown", "value"),
+        Input("date-range", "start_date"),
+        Input("date-range", "end_date"),
+        Input("data-revision", "data"),
+    )
+    def update_dashboard(symbol: str | None, start: str | None, end: str | None, _revision):
         if not symbol or symbol not in data_cache:
-            empty_fig = create_empty_figure("No data available")
-            return empty_fig, html.Div()
-        
-        if not start_date or not end_date:
-            empty_fig = create_empty_figure("Select date range")
-            return empty_fig, html.Div()
-        
+            return _empty_figure("No data available"), html.Div()
+        if not start or not end:
+            return _empty_figure("Select date range"), html.Div()
+
         try:
-            # Get cached data
-            df = data_cache[symbol].copy()
-            
-            # Calculate daily strategy returns
-            daily_returns = calculate_daily_strategies(df)
-            
-            # Filter by selected date range
-            mask = (daily_returns["Date"] >= start_date) & (daily_returns["Date"] <= end_date)
-            filtered_returns = daily_returns[mask].copy()
-            
-            if filtered_returns.empty:
-                empty_fig = create_empty_figure("No data in range")
-                return empty_fig, html.Div()
-            
-            # Convert to cumulative series for plotting
-            cumulative_data = get_cumulative_series(filtered_returns)
-            
-            # Calculate metrics for the selected range
-            metrics = calculate_metrics(daily_returns, start_date, end_date)
-            
-            # Create figure
-            fig = create_performance_figure(cumulative_data)
-            
-            # Create metrics display
-            metrics_div = create_metrics_display(metrics)
-            
-            return fig, metrics_div
-            
-        except Exception as e:
-            print(f"Error in callback: {str(e)}")
-            empty_fig = create_empty_figure(f"Error: {str(e)}")
-            return empty_fig, html.Div()
+            df = data_cache[symbol]
+            filtered = slice_range(df, start, end)
+            if filtered.empty:
+                return _empty_figure("No data in range"), html.Div()
+            return (
+                _performance_figure(get_cumulative_series(filtered)),
+                _metrics_display(calculate_metrics(df, start, end)),
+            )
+        except Exception as exc:
+            print(f"Error in callback: {exc}")
+            return _empty_figure(f"Error: {exc}"), html.Div()
 
 
-def create_empty_figure(message: str) -> go.Figure:
-    """Creates an empty figure with a centered message."""
+def _empty_figure(message: str) -> go.Figure:
     fig = go.Figure()
     fig.add_annotation(
-        text=message,
-        xref="paper",
-        yref="paper",
-        x=0.5,
-        y=0.5,
-        showarrow=False,
+        text=message, xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
         font=dict(size=13, color="#999"),
     )
     fig.update_layout(
@@ -278,63 +248,27 @@ def create_empty_figure(message: str) -> go.Figure:
     return fig
 
 
-def create_performance_figure(data: pd.DataFrame) -> go.Figure:
-    """Creates the performance comparison chart with monochrome styling."""
+def _performance_figure(data: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    
-    # Monochrome palette: very dark, very light, medium gray
-    colors = {
-        "overnight": "#1a1a1a",    # Very dark gray (almost black)
-        "intraday": "#d0d0d0",     # Very light gray
-        "buy_hold": "#808080",     # Medium gray
-    }
-    
-    # Add overnight strategy trace (very dark gray, solid)
-    fig.add_trace(
-        go.Scatter(
-            x=data["Date"],
-            y=data["overnight"] * 100,
-            mode="lines",
-            name="Overnight",
-            line=dict(color=colors["overnight"], width=2.5),
-            hovertemplate="<b>Overnight</b><br>%{y:.2f}%<extra></extra>",
+    for key, name, dash in (
+        ("overnight", "Overnight", "solid"),
+        ("intraday", "Intraday", "solid"),
+        ("buy_hold", "Buy & Hold", "dash"),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=data["Date"],
+                y=data[key] * 100,
+                mode="lines",
+                name=name,
+                line=dict(color=COLORS[key], width=2.5, dash=dash),
+                hovertemplate=f"<b>{name}</b><br>%{{y:.2f}}%<extra></extra>",
+            )
         )
-    )
-    
-    # Add intraday strategy trace (very light gray, solid)
-    fig.add_trace(
-        go.Scatter(
-            x=data["Date"],
-            y=data["intraday"] * 100,
-            mode="lines",
-            name="Intraday",
-            line=dict(color=colors["intraday"], width=2.5),
-            hovertemplate="<b>Intraday</b><br>%{y:.2f}%<extra></extra>",
-        )
-    )
-    
-    # Add buy-and-hold strategy trace (medium gray, DASHED)
-    fig.add_trace(
-        go.Scatter(
-            x=data["Date"],
-            y=data["buy_hold"] * 100,
-            mode="lines",
-            name="Buy & Hold",
-            line=dict(color=colors["buy_hold"], width=2.5, dash="dash"),  # Dashed line
-            hovertemplate="<b>Buy & Hold</b><br>%{y:.2f}%<extra></extra>",
-        )
-    )
-    
-    # Update layout - compact and professional
     fig.update_layout(
         template="plotly_white",
-        showlegend=False,  # Remove legend (colors match metrics below)
-        xaxis=dict(
-            showgrid=True,
-            gridcolor="#f0f0f0",
-            zeroline=False,
-            title="",
-        ),
+        showlegend=False,
+        xaxis=dict(showgrid=True, gridcolor="#f0f0f0", zeroline=False, title=""),
         yaxis=dict(
             title="Cumulative Return (%)",
             showgrid=True,
@@ -350,41 +284,27 @@ def create_performance_figure(data: pd.DataFrame) -> go.Figure:
         plot_bgcolor="white",
         paper_bgcolor="white",
     )
-    
     return fig
 
 
-def create_metrics_display(metrics: Dict[str, float]) -> html.Div:
-    """Creates the compact metrics display with matching border styles."""
+def _metrics_display(metrics: dict[str, dict[str, float]]) -> html.Div:
+    cards = (
+        ("overnight", "Overnight", "Close → Open", "metric-card-overnight"),
+        ("intraday", "Intraday", "Open → Close", "metric-card-intraday"),
+        ("buy_hold", "Buy & Hold", "Close → Close", "metric-card-buyhold"),
+    )
     return html.Div(
         className="metrics-grid",
         children=[
-            # Overnight metric (very dark gray solid border)
             html.Div(
-                className="metric-card metric-card-overnight",
+                className=f"metric-card {css}",
                 children=[
-                    html.Div("Overnight", className="metric-label"),
-                    html.Div(f"{metrics['overnight']:+.2f}%", className="metric-value"),
-                    html.Div("Close → Open", className="metric-subtitle"),
-                ]
-            ),
-            # Intraday metric (very light gray solid border)
-            html.Div(
-                className="metric-card metric-card-intraday",
-                children=[
-                    html.Div("Intraday", className="metric-label"),
-                    html.Div(f"{metrics['intraday']:+.2f}%", className="metric-value"),
-                    html.Div("Open → Close", className="metric-subtitle"),
-                ]
-            ),
-            # Buy & Hold metric (medium gray dashed border)
-            html.Div(
-                className="metric-card metric-card-buyhold",
-                children=[
-                    html.Div("Buy & Hold", className="metric-label"),
-                    html.Div(f"{metrics['buy_hold']:+.2f}%", className="metric-value"),
-                    html.Div("Close → Close", className="metric-subtitle"),
-                ]
-            ),
-        ]
+                    html.Div(label, className="metric-label"),
+                    html.Div(f"{metrics[key]['return']:+.2f}%", className="metric-value"),
+                    html.Div(f"Sharpe {metrics[key]['sharpe']:.2f}", className="metric-sharpe"),
+                    html.Div(subtitle, className="metric-subtitle"),
+                ],
+            )
+            for key, label, subtitle, css in cards
+        ],
     )
