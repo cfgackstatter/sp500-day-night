@@ -25,8 +25,30 @@ def save_tickers(tickers: list[str]) -> None:
     TICKERS_FILE.write_text("\n".join(dict.fromkeys(tickers)) + "\n")
 
 
-def dropdown_options(tickers: list[str]) -> list[dict[str, str]]:
-    return [{"label": t, "value": t} for t in tickers]
+def resolve_name(symbol: str) -> str:
+    """Fetch instrument name from Yahoo Finance; fall back to the symbol."""
+    try:
+        info = yf.Ticker(symbol).info or {}
+        return info.get("longName") or info.get("shortName") or symbol
+    except Exception:
+        return symbol
+
+
+def load_names(tickers: list[str]) -> dict[str, str]:
+    return {symbol: resolve_name(symbol) for symbol in tickers}
+
+
+def dropdown_options(
+    tickers: list[str],
+    names: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    names = names or {}
+    options = []
+    for symbol in tickers:
+        name = names.get(symbol)
+        label = f"{symbol} — {name}" if name and name != symbol else symbol
+        options.append({"label": label, "value": symbol})
+    return options
 
 
 def _flatten(df: pd.DataFrame) -> pd.DataFrame:
@@ -148,11 +170,17 @@ def load_all_data(tickers: list[str] | None = None) -> dict[str, pd.DataFrame]:
     return cache
 
 
-def refresh_cache(data_cache: dict[str, pd.DataFrame], tickers: list[str] | None = None) -> list[str]:
-    """Reload all ticker data into an existing cache dict. Returns loaded symbols."""
+def refresh_cache(
+    data_cache: dict[str, pd.DataFrame],
+    name_cache: dict[str, str],
+    tickers: list[str] | None = None,
+) -> list[str]:
+    """Reload price data and names into existing cache dicts. Returns loaded symbols."""
     fresh = load_all_data(tickers or list(data_cache) or load_tickers())
     data_cache.clear()
     data_cache.update(fresh)
+    name_cache.clear()
+    name_cache.update(load_names(list(data_cache)))
     return list(data_cache)
 
 

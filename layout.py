@@ -16,6 +16,7 @@ from data_utils import (
     get_cumulative_series,
     load_tickers,
     refresh_cache,
+    resolve_name,
     save_tickers,
     slice_range,
 )
@@ -24,7 +25,11 @@ PERIODS = ("ytd", "1y", "3y", "5y", "10y", "custom")
 COLORS = {"overnight": "#1a1a1a", "intraday": "#d0d0d0", "buy_hold": "#808080"}
 
 
-def create_layout(app: Dash, data_cache: dict[str, pd.DataFrame]) -> html.Div:
+def create_layout(
+    app: Dash,
+    data_cache: dict[str, pd.DataFrame],
+    name_cache: dict[str, str],
+) -> html.Div:
     tickers = list(data_cache) or load_tickers()
     start, end = calculate_date_range("1y", data_cache)
 
@@ -41,7 +46,7 @@ def create_layout(app: Dash, data_cache: dict[str, pd.DataFrame]) -> html.Div:
                             html.Label("Ticker", className="control-label"),
                             dcc.Dropdown(
                                 id="symbol-dropdown",
-                                options=dropdown_options(tickers),
+                                options=dropdown_options(tickers, name_cache),
                                 value=tickers[0] if tickers else None,
                                 clearable=False,
                                 searchable=True,
@@ -113,7 +118,7 @@ def create_layout(app: Dash, data_cache: dict[str, pd.DataFrame]) -> html.Div:
             html.Div(id="metrics-container", className="metrics-container"),
         ],
     )
-    register_callbacks(app, data_cache)
+    register_callbacks(app, data_cache, name_cache)
     return layout
 
 
@@ -124,7 +129,11 @@ def _period_classes(active: str) -> list[str]:
     ]
 
 
-def register_callbacks(app: Dash, data_cache: dict[str, pd.DataFrame]) -> None:
+def register_callbacks(
+    app: Dash,
+    data_cache: dict[str, pd.DataFrame],
+    name_cache: dict[str, str],
+) -> None:
     @app.callback(
         Output("current-period", "children"),
         Output("date-range", "className"),
@@ -176,14 +185,27 @@ def register_callbacks(app: Dash, data_cache: dict[str, pd.DataFrame]) -> None:
             if not symbol:
                 return no_update, no_update, "Enter a ticker symbol", no_update, no_update
             if symbol in data_cache:
-                return dropdown_options(tickers), symbol, f"{symbol} already loaded", "", no_update
+                return (
+                    dropdown_options(tickers, name_cache),
+                    symbol,
+                    f"{symbol} already loaded",
+                    "",
+                    no_update,
+                )
             df = fetch_symbol(symbol)
             if df is None:
                 return no_update, no_update, f"Could not load {symbol}", no_update, no_update
             data_cache[symbol] = df
+            name_cache[symbol] = resolve_name(symbol)
             tickers = list(data_cache)
             save_tickers(tickers)
-            return dropdown_options(tickers), symbol, f"Added {symbol}", "", revision
+            return (
+                dropdown_options(tickers, name_cache),
+                symbol,
+                f"Added {symbol}",
+                "",
+                revision,
+            )
 
         if ctx.triggered_id == "btn-remove":
             if not current or current not in data_cache:
@@ -191,17 +213,29 @@ def register_callbacks(app: Dash, data_cache: dict[str, pd.DataFrame]) -> None:
             if len(data_cache) <= 1:
                 return no_update, no_update, "Keep at least one ticker", no_update, no_update
             del data_cache[current]
+            name_cache.pop(current, None)
             tickers = list(data_cache)
             save_tickers(tickers)
-            return dropdown_options(tickers), tickers[0], f"Removed {current}", no_update, revision
+            return (
+                dropdown_options(tickers, name_cache),
+                tickers[0],
+                f"Removed {current}",
+                no_update,
+                revision,
+            )
 
-        loaded = refresh_cache(data_cache, load_tickers())
+        loaded = refresh_cache(data_cache, name_cache, load_tickers())
         if not loaded:
             return [], None, "Refresh failed — no data", no_update, revision
         save_tickers(loaded)
         selected = current if current in loaded else loaded[0]
-        return dropdown_options(loaded), selected, f"Refreshed {len(loaded)} tickers", no_update, revision
-
+        return (
+            dropdown_options(loaded, name_cache),
+            selected,
+            f"Refreshed {len(loaded)} tickers",
+            no_update,
+            revision,
+        )
     @app.callback(
         Output("perf-graph", "figure"),
         Output("metrics-container", "children"),

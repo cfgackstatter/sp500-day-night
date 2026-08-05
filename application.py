@@ -5,7 +5,7 @@ Named application.py for AWS Elastic Beanstalk; WSGI target is `application`.
 
 from dash import Dash
 
-from data_utils import load_all_data, load_tickers
+from data_utils import load_all_data, load_names, load_tickers
 from layout import create_layout
 
 app = Dash(
@@ -17,9 +17,10 @@ app.title = "Day vs Night Returns"
 
 print("Loading historical data...")
 data_cache = load_all_data(load_tickers())
+name_cache = load_names(list(data_cache))
 print("Data loading complete!")
 
-app.layout = create_layout(app, data_cache)
+app.layout = create_layout(app, data_cache, name_cache)
 application = app.server
 
 if __name__ == "__main__":
